@@ -44,17 +44,17 @@ wget -P /workspace/ComfyUI/models/loras "https://civitai.com/api/download/models
 
 pip install gguf==0.17.1 &&
 
-pip sentencepiece &&
+pip install sentencepiece &&
 
-pip protobuf==6.32.0 &&
+pip install protobuf==6.32.0 &&
 
-pip opencv-python &&
+pip install opencv-python &&
 
-pip matplotlib==3.10.5 &&
+pip install matplotlib==3.10.5 &&
 
-pip pywavelets==1.9.0 &&
+pip install pywavelets==1.9.0 &&
 
-pip numpy>=1.26.4
+pip install numpy>=1.26.4 &&
 
 cd /workspace/ComfyUI &&
 
