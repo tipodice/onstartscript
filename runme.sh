@@ -24,7 +24,7 @@ git clone https://github.com/WASasquatch/was-node-suite-comfyui.git &&
 
 git clone https://github.com/rgthree/rgthree-comfy.git &&
 
-git clone https://github.com/cubiq/ComfyUI_essentials.git &&
+# git clone https://github.com/cubiq/ComfyUI_essentials.git &&
 
 git clone https://github.com/kijai/ComfyUI-KJNodes.git &&
 
