@@ -44,6 +44,6 @@ wget -P /workspace/ComfyUI/models/loras "https://civitai.com/api/download/models
 
 cd /workspace/ComfyUI &&
 
-git pull origin master && 
+git pull origin master
 
 pip install -r requirements.txt &&
