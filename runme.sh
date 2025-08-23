@@ -42,6 +42,20 @@ wget -P /workspace/ComfyUI/models/loras "https://civitai.com/api/download/models
 
 wget -P /workspace/ComfyUI/models/loras "https://civitai.com/api/download/models/2075810?type=Model&format=SafeTensor" --content-disposition
 
+pip install gguf==0.17.1 &&
+
+pip sentencepiece &&
+
+pip protobuf==6.32.0 &&
+
+pip opencv-python &&
+
+pip matplotlib==3.10.5 &&
+
+pip pywavelets==1.9.0 &&
+
+pip numpy>=1.26.4
+
 cd /workspace/ComfyUI &&
 
 git pull origin master &&
