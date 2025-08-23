@@ -4,14 +4,6 @@ apt update &&
 
 apt upgrade -y &&
 
-cd /workspace/ComfyUI &&
-
-git pull origin master && 
-
-pip install comfy
-
-pip install -r requirements.txt &&
-
 cd /workspace/ComfyUI/custom_nodes &&
 
 git clone https://github.com/ClownsharkBatwing/RES4LYF.git &&
@@ -23,8 +15,6 @@ git clone https://github.com/city96/ComfyUI-GGUF.git &&
 git clone https://github.com/WASasquatch/was-node-suite-comfyui.git &&
 
 git clone https://github.com/rgthree/rgthree-comfy.git &&
-
-# git clone https://github.com/cubiq/ComfyUI_essentials.git &&
 
 git clone https://github.com/kijai/ComfyUI-KJNodes.git &&
 
@@ -49,3 +39,9 @@ wget -P /workspace/ComfyUI/models/vae https://huggingface.co/Comfy-Org/Wan_2.1_C
 wget -P /workspace/ComfyUI/models/loras "https://civitai.com/api/download/models/2075971?type=Model&format=SafeTensor" --content-disposition &&
 
 wget -P /workspace/ComfyUI/models/loras "https://civitai.com/api/download/models/2075810?type=Model&format=SafeTensor" --content-disposition
+
+cd /workspace/ComfyUI &&
+
+git pull origin master && 
+
+pip install -r requirements.txt &&
