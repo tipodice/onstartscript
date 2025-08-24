@@ -261,6 +261,29 @@ EOF
     # Update supervisor to include the new configuration
     supervisorctl update
     
+    # Update PORTAL_CONFIG to include the companion server
+    # This ensures the companion server is accessible through the Instance Portal
+    if [ -f /etc/portal.yaml ]; then
+        # Check if companion server is already in the config
+        if ! grep -q "Companion Server" /etc/portal.yaml; then
+            # Add companion server to the config
+            sed -i '/^applications:/a\  - host: localhost\n    external_port: 8000\n    local_port: 8000\n    path: /\n    name: Companion Server' /etc/portal.yaml
+        fi
+    else
+        # Create a new portal.yaml if it doesn't exist
+        cat > /etc/portal.yaml << 'EOF'
+applications:
+  - host: localhost
+    external_port: 8000
+    local_port: 8000
+    path: /
+    name: Companion Server
+EOF
+    fi
+    
+    # Restart caddy to apply changes
+    supervisorctl restart caddy
+    
     printf "Companion server setup complete. It will start automatically.\n"
 }
 
