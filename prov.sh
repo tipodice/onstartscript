@@ -139,7 +139,7 @@ function provisioning_has_valid_hf_token() {
 
     response=$(curl -o /dev/null -s -w "%{http_code}" -X GET "$url" \
         -H "Authorization: Bearer $HF_TOKEN" \
-        -H "Content-Type: application/json")
+        -H "Content-Type": "application/json")
 
     # Check if the token is valid
     if [ "$response" -eq 200 ]; then
@@ -155,7 +155,7 @@ function provisioning_has_valid_civitai_token() {
 
     response=$(curl -o /dev/null -s -w "%{http_code}" -X GET "$url" \
         -H "Authorization: Bearer $CIVITAI_TOKEN" \
-        -H "Content-Type: application/json")
+        -H "Content-Type": "application/json")
 
     # Check if the token is valid
     if [ "$response" -eq 200 ]; then
@@ -199,10 +199,10 @@ import asyncio
 
 app = FastAPI(title="ComfyUI Companion")
 
-# Configuration
+# Configuration - Use the internal port 18188 as specified in COMFYUI_ARGS
 WORKSPACE = os.getenv("WORKSPACE", "/workspace")
 COMFYUI_DIR = os.path.join(WORKSPACE, "ComfyUI")
-COMFYUI_URL = "http://localhost:8188"
+COMFYUI_URL = "http://localhost:18188"
 COMPANION_PORT = 8000
 
 @app.get("/")
@@ -218,8 +218,8 @@ async def health():
             async with session.get(f"{COMFYUI_URL}/system_stats", timeout=5) as response:
                 comfy_healthy = response.status == 200
                 return {"comfyui": comfy_healthy, "status": "healthy" if comfy_healthy else "unhealthy"}
-    except Exception:
-        return {"comfyui": False, "status": "unhealthy"}
+    except Exception as e:
+        return {"comfyui": False, "status": "unhealthy", "error": str(e)}
 
 @app.get("/models")
 async def list_models():
