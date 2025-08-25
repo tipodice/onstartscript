@@ -6,7 +6,7 @@ COMFYUI_DIR=${WORKSPACE}/ComfyUI
 # Packages are installed after nodes so we can fix them...
 
 APT_PACKAGES=(
-    "cloudflared"
+    # cloudflared is already installed on all vastai instances
 )
 
 PIP_PACKAGES=(
@@ -191,6 +191,7 @@ ComfyUI Companion Server with Cloudflare Tunnel & S3 Integration
 - Extracts tunnel URL from cloudflared output
 - Stores tunnel URL in S3 as instance_id.json (no paths)
 - Minimal, focused functionality with auto-shutdown
+- Waits for ComfyUI to be ready before creating tunnel
 """
 
 import os
@@ -249,6 +250,7 @@ S3_KEY = f"{CONTAINER_ID}.json"  # Store as instance_id.json (no paths)
 # Cloudflare tunnel management
 tunnel_process = None
 tunnel_url = None
+comfyui_ready = False
 
 # Activity tracking
 last_activity_time = time.time()
@@ -323,6 +325,15 @@ async def delete_from_s3():
         return True
     except Exception as e:
         logger.error(f"Failed to delete from S3: {str(e)}")
+        return False
+
+async def check_comfyui_ready():
+    """Check if ComfyUI is ready"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{COMFYUI_URL}/system_stats", timeout=5) as response:
+                return response.status == 200
+    except:
         return False
 
 def create_cloudflare_tunnel():
@@ -448,6 +459,28 @@ def force_shutdown():
     logger.info("Force shutting down server")
     os.kill(os.getpid(), signal.SIGTERM)
 
+async def wait_for_comfyui():
+    """Wait for ComfyUI to be ready before creating tunnel"""
+    global comfyui_ready
+    
+    max_attempts = 60  # 5 minutes max wait time
+    attempt = 0
+    
+    while attempt < max_attempts and not comfyui_ready:
+        attempt += 1
+        comfyui_ready = await check_comfyui_ready()
+        
+        if comfyui_ready:
+            logger.info("ComfyUI is ready, creating tunnel...")
+            create_cloudflare_tunnel()
+            return
+        else:
+            logger.info(f"Waiting for ComfyUI to be ready... (attempt {attempt}/{max_attempts})")
+            await asyncio.sleep(5)  # Wait 5 seconds between checks
+    
+    if not comfyui_ready:
+        logger.error("ComfyUI did not become ready within the expected time")
+
 @app.middleware("http")
 async def activity_middleware(request: Request, call_next):
     """Middleware to track activity on all requests"""
@@ -463,6 +496,7 @@ async def root(token: str = Depends(verify_token)):
         "version": "1.0.0",
         "comfyui_url": COMFYUI_URL,
         "container_id": CONTAINER_ID,
+        "comfyui_ready": comfyui_ready,
         "tunnel_url": tunnel_url,
         "tunnel_status": "active" if tunnel_url else "inactive",
         "aws_configured": bool(AWS_S3_BUCKET),
@@ -474,10 +508,8 @@ async def root(token: str = Depends(verify_token)):
 async def health_check():
     """Health check for ComfyUI and companion server"""
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{COMFYUI_URL}/system_stats", timeout=5) as response:
-                comfyui_healthy = response.status == 200
-                comfyui_status = "healthy" if comfyui_healthy else "unhealthy"
+        comfyui_healthy = await check_comfyui_ready()
+        comfyui_status = "healthy" if comfyui_healthy else "unhealthy"
                 
         return {
             "comfyui": comfyui_status,
@@ -550,6 +582,10 @@ async def proxy_comfyui(path: str, request: Request, token: str = Depends(verify
     if is_shutting_down:
         raise HTTPException(status_code=503, detail="Server is shutting down")
     
+    # Check if ComfyUI is ready
+    if not comfyui_ready:
+        raise HTTPException(status_code=503, detail="ComfyUI is not ready yet")
+    
     # Build the target URL
     target_url = f"{COMFYUI_URL}/{path}"
     if request.query_params:
@@ -606,11 +642,8 @@ async def startup_event():
     # Initialize activity tracking
     update_activity()
     
-    # Create Cloudflare tunnel for the companion server
-    try:
-        create_cloudflare_tunnel()
-    except Exception as e:
-        logger.error(f"Failed to create Cloudflare tunnel on startup: {str(e)}")
+    # Start background task to wait for ComfyUI and then create tunnel
+    asyncio.create_task(wait_for_comfyui())
 
 # Cleanup on shutdown
 @app.on_event("shutdown")
@@ -679,7 +712,7 @@ EOF
     # Restart caddy to apply changes
     supervisorctl restart caddy
     
-    printf "Companion server setup complete. It will start automatically.\n"
+    printf "Companion server setup complete. It will start automatically and wait for ComfyUI to be ready.\n"
 }
 
 # Allow user to disable provisioning if they started with a script they didn't want
