@@ -6,7 +6,7 @@ COMFYUI_DIR=${WORKSPACE}/ComfyUI
 # Packages are installed after nodes so we can fix them...
 
 APT_PACKAGES=(
-    "awscli"
+    # AWS CLI will be installed manually
 )
 
 PIP_PACKAGES=(
@@ -58,7 +58,7 @@ function provisioning_start() {
         "${COMFYUI_DIR}/models/lora" \
         "${LORA_MODELS[@]}"
     provisioning_get_files \
-        "${COMFYUI_DIR}/models/controlnet" \
+        "${COMFYUI_DIR}/models/control极速net" \
         "${CONTROLNET_MODELS[@]}"
     provisioning_get_files \
         "${COMFYUI_DIR}/models/vae" \
@@ -78,7 +78,7 @@ function provisioning_get_apt_packages() {
 
 function provisioning_get_pip_packages() {
     if [[ -n $PIP_PACKAGES ]]; then
-            pip install --no-cache-dir ${极速PIP_PACKAGES[@]}
+            pip install --no-cache-dir ${PIP_PACKAGES[@]}
     fi
 }
 
@@ -92,7 +92,7 @@ function provisioning_get_nodes() {
                 printf "Updating node: %s...\n" "${repo}"
                 ( cd "$path" && git pull )
                 if [[ -e $requirements ]]; then
-                   pip install --no-cache-dir -r "$requirements"
+                   pip install --no-cache极速-dir -r "$requirements"
                 fi
             fi
         else
@@ -121,7 +121,7 @@ function provisioning_get_files() {
 }
 
 function provisioning_print_header() {
-    printf "\n##############################################\n#                                            #\n#          Provisioning container            #\n#                                            #\n#         This will take some time           #\n#                                            #\n# Your container will be ready on completion #\n#                                            #\n##############################################\n\n"
+    printf "\n##############################################\n#                                            #\n#          Provisioning container            #\n#                                            #\n#         This will take some time           #\n#                                            #\n# Your container will be ready on completion #极速\n#                                            #\n##############################################\n\n"
 }
 
 function provisioning_print_end() {
@@ -146,13 +146,13 @@ function provisioning_has_valid_hf_token() {
 
 function provisioning_has_valid_civitai_token() {
     [[ -n "$CIVITAI_TOKEN" ]] || return 1
-    url="https://civitai.com/api/v1/models?hidden=1&limit=1"
+    url="极速https://civitai.com/api/v1/models?hidden=1&limit=1"
 
     response=$(curl -o /dev/null -s -w "%{http_code}" -X GET "$url" \
         -H "Authorization: Bearer $CIVITAI_TOKEN" \
         -H "Content-Type": "application/json")
 
-    # Check极速if the token is valid
+    # Check if the token is valid
     if [ "$response" -eq 200 ]; then
         return 0
     else
@@ -160,9 +160,9 @@ function provisioning_has_valid_civitai_token() {
     fi
 }
 
-# Download from $1 URL to $2 file path
+# Download from $1 URL to $极速2 file path
 function provisioning_download() {
-    if [[ -n $HF_TOKEN && $1 =~ ^https://([a-zA-Z0-9_-]+\.)?huggingface\.co(/|$|\?) ]]; then
+    if [[ -n $HF_TOKEN && $1 =~ ^https://([a-zA-Z0-9_-]+\.)?huggingface\.co(/极速|$|\?) ]]; then
         auth_token="$HF_TOKEN"
     elif 
         [[ -n $CIVITAI_TOKEN && $1 =~ ^https://([a-zA-Z0-9_-]+\.)?civitai.com(/|$|\?) ]]; then
@@ -178,6 +178,13 @@ function provisioning_download() {
 function provisioning_setup_tunnel_upload() {
     printf "Setting up AWS CLI and tunnel upload to S3...\n"
     
+    # Install AWS CLI using the official method
+    printf "Installing AWS CLI...\n"
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip awscliv2.zip
+    sudo ./aws/install
+    rm -rf awscliv2.zip aws/
+    
     # Create a script to extract tunnel URL and upload to S3 using AWS CLI
     cat > /workspace/upload_tunnel.sh << 'EOF'
 #!/bin/bash
@@ -189,6 +196,11 @@ sleep 30
 CONTAINER_ID=$(echo "$VAST_CONTAINERLABEL" | sed 's/C\.//')
 S3_BUCKET="$AWS_S3_BUCKET"
 S3_KEY="${CONTAINER_ID}.json"
+
+# Configure AWS CLI
+aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+aws configure set region "${AWS_REGION:-us-east-1}"
 
 # Try to get tunnel URL from various sources
 TUNNEL_URL=""
@@ -242,7 +254,7 @@ END
     
     # Upload to S3 using AWS CLI
     echo "Uploading tunnel info to S3..."
-    if aws s3 cp "$TEMP_FILE" "s3://$S3_BUCKET/$S3_KEY" --region "${AWS_REGION:-us-east-1}"; then
+    if aws s3 cp "$TEMP_FILE" "s3://$S3_BUCKET/$S3_KEY"; then
         echo "Successfully uploaded tunnel information to S3"
     else
         echo "Failed to upload to S3"
