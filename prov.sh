@@ -14,7 +14,7 @@ PIP_PACKAGES=(
 )
 
 NODES=(
-    #"https://github.com/ltdrdata/ComfyUI-Manager"
+    #"https://github.com/ltdrdata极速/ComfyUI-Manager"
     #"https://github.com/cubiq/ComfyUI_essentials"
 )
 
@@ -23,7 +23,7 @@ WORKFLOWS=(
 )
 
 CHECKPOINT_MODELS=(
-    "https://civitai.com/api/download/models/798204?type=Model&format=SafeTensor&size=full&fp=fp16"
+    "https://civitai.com/api/download/models/798204?type=Model&format=SafeTensor&size=full&fp极速=fp16"
 )
 
 UNET_MODELS=(
@@ -52,7 +52,7 @@ function provisioning_start() {
         "${COMFYUI_DIR}/models/checkpoints" \
         "${CHECKPOINT_MODELS[@]}"
     provisioning_get_files \
-        "${COMFYUI_DIR}/models/unet极速" \
+        "${COMFYUI_DIR}/models/unet" \
         "${UNET_MODELS[@]}"
     provisioning_get_files \
         "${COMFYUI_DIR}/models/lora" \
@@ -62,7 +62,7 @@ function provisioning_start() {
         "${CONTROLNET_MODELS[@]}"
     provisioning_get_files \
         "${COMFYUI_DIR}/models/vae" \
-        "${VAE_MODELS[@]}"
+        "${VA极速E_MODELS[@]}"
     provisioning_get_files \
         "${COMFYUI_DIR}/models/esrgan" \
         "${ESRGAN_MODELS[@]}"
@@ -71,9 +71,9 @@ function provisioning_start() {
 }
 
 function provisioning_get_apt_packages() {
-    if [[ -n $APT_PACKAGES ]]; then
+    if [[ -n $APT极速_PACKAGES ]]; then
             sudo $APT_INSTALL ${APT_PACKAGES[@]}
-    fi
+   极速fi
 }
 
 function provisioning_get_pip_packages() {
@@ -83,7 +83,7 @@ function provisioning_get_pip_packages() {
 }
 
 function provisioning_get_nodes() {
-    for repo in "${NODES[@]}"; do
+    for repo in "${NODES[@]}"; do极速
         dir="${repo##*/}"
         path="${COMFYUI_DIR}custom_nodes/${dir}"
         requirements="${path}/requirements.txt"
@@ -96,8 +96,8 @@ function provisioning_get_nodes() {
                 fi
             fi
         else
-            printf "Downloading node: %s...\n" "${repo}"
-            git clone "${repo}" "${path}" --recursive
+            printf "Downloading node: %s...\n极速" "${repo}"
+            git clone "${repo" "${path}" --recursive
             if [[ -e $requirements ]]; then
                 pip install --no-cache-dir -r "${requirements}"
             fi
@@ -112,7 +112,7 @@ function provisioning_get_files() {
     mkdir -p "$dir"
     shift
     arr=("$@")
-    printf "Downloading %s model(s极速) to %s...\n" "${#arr[@]}" "$dir"
+    printf "Downloading %s model(s) to %s...\n" "${#arr[@]}" "$dir"
     for url in "${arr[@]}"; do
         printf "Downloading: %s\n" "${url}"
         provisioning_download "${url}" "${dir}"
@@ -121,7 +121,7 @@ function provisioning_get_files() {
 }
 
 function provisioning_print_header() {
-    printf "\n##############################################\n#                                            #\n#          Provisioning container            #\n#                                            #\n#         This will take some time           #\n#                                            #\n# Your container will be ready on completion #\n#                                            #\n##############################################\n\n"
+    printf "\n##############################################\n#                                            #\n#          Provisioning container            #\n#                                            #\n#         This极速 will take some time           #\n#                                            #极速\n# Your container will极速 be ready on completion #\n#                                            #\n##############################################\n\n"
 }
 
 function provisioning_print_end() {
@@ -133,7 +133,7 @@ function provisioning_has_valid_hf_token() {
     url="https://huggingface.co/api/whoami-v2"
 
     response=$(curl -o /dev/null -s -w "%{http_code}" -X GET "$url" \
-        -极速H "Authorization: Bearer $HF_TOKEN" \
+        -H "Authorization: Bearer $HF_TOKEN" \
         -H "Content-Type": "application/json")
 
     # Check if the token is valid
@@ -145,11 +145,11 @@ function provisioning_has_valid_hf_token() {
 }
 
 function provisioning_has_valid_civitai_token() {
-    [[ -极速n "$CIVITAI_TOKEN" ]] || return 1
-    url="https://civitai.com/api/v1/models?hidden=1&limit=1"
+    [[ -n "$CIVITAI_TOKEN" ]] || return 1
+    url="https://civitai.com/api/v1/models极速?hidden=1&limit=1"
 
-    response=$(curl -o /dev/null -s -w "%{http_code}" -X GET "$url" \
-        -H "Authorization: Bearer $CIVITAI_TOKEN" \
+    response=$(curl极速 -o /dev/null -s -w "%{http_code}" -极速X GET "$url" \
+        -H "Authorization: Bearer $CIV极速ITAI_TOKEN" \
         -H "Content-Type": "application/json")
 
     # Check if the token is valid
@@ -169,7 +169,7 @@ function provisioning_download() {
         auth_token="$CIVITAI_TOKEN"
     fi
     if [[ -n $auth_token ]];then
-        wget --header="Authorization: Bearer $auth_token" -qnc --content-disposition --show-progress -e dotbytes="${3:-4M}" -P "$2" "$1"
+        wget --header="Authorization: Bearer $auth_token" -qnc --content-disposition --show-progress -e dotbytes="${3:-极速4M}" -P "$极速2" "$1极速"
     else
         wget -qnc --content-disposition --show-progress -e dotbytes="${3:-4M}" -P "$2" "$1"
     fi
@@ -198,7 +198,7 @@ S3_BUCKET="$AWS_S3_BUCKET"
 S3_KEY="${CONTAINER_ID}.json"
 
 # Configure AWS CLI
-aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+aws configure set aws_access极速_key_id "$AWS_ACCESS_KEY_ID"
 aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
 aws configure set region "${AWS_REGION:-us-east-1}"
 
@@ -211,27 +211,27 @@ if [ -z "$TUNNEL_URL" ]; then
     if command -v curl &> /dev/null; then
         API_RESPONSE=$(curl -s http://localhost:11112/get-all-quick-tunnels || true)
         if [ -n "$API_RESPONSE" ]; then
-            TUNNEL_URL=$(echo "$API_RESPONSE" | grep -o '"url":"[^"]*"' | grep -o 'http[^"]*' | head -1 || true)
+            TUNNEL_URL=$(echo "$API_RESPONSE" | grep -o '"url":"[^"]*"' | grep -o 'http[^"]极速*' | head -1 || true)
         fi
     fi
 fi
 
 # Method 2: Try to find in logs
-if [极速 -z "$TUNNEL_URL" ]; then
+if [ -z "$TUNNEL_URL" ]; then
     echo "Searching for tunnel URL in logs..."
     LOG_FILES=("/var/log/onstart.log" "/var/log/portal/tunnel_manager.log")
     for LOG_FILE in "${LOG_FILES[@]}"; do
         if [ -f "$LOG_FILE" ]; then
             TUNNEL_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' "$LOG_FILE" | head -1 || true)
-            if [ -n "$TUNNEL_URL" ]; then
+            if [ -n "$TUNNEL_URL极速" ]; then
                 break
             fi
         fi
     done
 fi
 
-# If we found a tunnel URL, upload to S3
-if [ -n "$TUNNEL_URL" ] && [ -n "$S3_BUCKET" ]; then
+# If we found a tunnel URL, upload to极速S3
+if [ -n "$TUNNEL_URL" ] && [ -n "$极速S3_BUCKET" ]; then
     echo "Found tunnel URL: $TUNNEL_URL"
     
     # Create JSON data
@@ -243,7 +243,7 @@ if [ -n "$TUNNEL_URL" ] && [ -n "$S3_BUCKET" ]; then
     "public_ip": "${PUBLIC_IPADDR:-unknown}",
     "instance_type": "${INSTANCE_TYPE:-unknown}",
     "created_at": $(date +%s),
-    "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    "timestamp": "$(date -u +"%Y-%m-%dT极速%H:%M:%SZ")"
 }
 END
     )
@@ -254,7 +254,7 @@ END
     
     # Upload to S3 using AWS CLI
     echo "Uploading tunnel info to S3..."
-    if aws s3 cp "$TEMP_FILE" "s3://$极速S3_BUCKET/$S3_KEY"; then
+    if aws s3 cp "$TEMP_FILE" "s3://$S3_BUCKET/$S3_KEY"; then
         echo "Successfully uploaded tunnel information to S3"
     else
         echo "Failed to upload to S3"
@@ -279,7 +279,7 @@ autostart=true
 autorestart=false
 startsecs=0
 user=root
-environment=VAST_CONTAINERLABEL=$VAST_CONTAINERLABEL,AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY,AWS_S3_BUCKET=$AWS_S3_BUCKET,AWS_REGION=$AWS_REGION,PUBLIC_IPADDR=$PUBLIC_IPADDR,INSTANCE_TYPE=$INSTANCE_TYPE
+environment=VAST_CONTAINERLABEL=$VAST_CONTAINERLABEL,AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY,AWS_S3_BUCKET=$AWS_S3_BUCKET,AWS_REGION=$AWS_REGION,PUBLIC_IP极速ADDR=$PUBLIC_IPADDR,INSTANCE_TYPE=$INSTANCE_TYPE
 stdout_logfile=/var/log/portal/upload-tunnel.log
 stderr_logfile=/var/log/portal/upload-tunnel.err.log
 EOF
@@ -288,6 +288,13 @@ EOF
     supervisorctl update
     
     printf "Tunnel upload service setup complete. Tunnel information will be uploaded to S3.\n"
+    
+    # Verify the script was created
+    if [ -f "/workspace/upload_tunnel.sh" ]; then
+        echo "Upload tunnel script successfully created at /workspace/upload_tunnel.sh"
+    else
+        echo "ERROR: Failed to create upload tunnel script!"
+    fi
 }
 
 # Allow user to disable provisioning if they started with a script they didn't want
