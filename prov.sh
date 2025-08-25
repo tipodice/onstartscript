@@ -6,15 +6,11 @@ COMFYUI_DIR=${WORKSPACE}/ComfyUI
 # Packages are installed after nodes so we can fix them...
 
 APT_PACKAGES=(
-    # cloudflared is already installed on all vastai instances
+    "awscli"
 )
 
 PIP_PACKAGES=(
-    "fastapi"
-    "uvicorn[standard]"
-    "aiohttp"
-    "boto3"
-    "requests"
+    # No Python packages needed for AWS CLI
 )
 
 NODES=(
@@ -45,7 +41,7 @@ ESRGAN_MODELS=(
 CONTROLNET_MODELS=(
 )
 
-### DO NOT EDIT BELAY HERE UNLESS YOU KNOW WHAT YOU ARE DOING ###
+### DO NOT EDIT BELOW HERE UNLESS YOU KNOW WHAT YOU ARE DOING ###
 
 function provisioning_start() {
     provisioning_print_header
@@ -70,7 +66,7 @@ function provisioning_start() {
     provisioning_get_files \
         "${COMFYUI_DIR}/models/esrgan" \
         "${ESRGAN_MODELS[@]}"
-    provisioning_setup_companion_server
+    provisioning_setup_tunnel_upload
     provisioning_print_end
 }
 
@@ -82,7 +78,7 @@ function provisioning_get_apt_packages() {
 
 function provisioning_get_pip_packages() {
     if [[ -n $PIP_PACKAGES ]]; then
-            pip install --no-cache-dir ${PIP_PACKAGES[@]}
+            pip install --no-cache-dir ${极速PIP_PACKAGES[@]}
     fi
 }
 
@@ -156,7 +152,7 @@ function provisioning_has_valid_civitai_token() {
         -H "Authorization: Bearer $CIVITAI_TOKEN" \
         -H "Content-Type": "application/json")
 
-    # Check if the token is valid
+    # Check极速if the token is valid
     if [ "$response" -eq 200 ]; then
         return 0
     else
@@ -179,540 +175,117 @@ function provisioning_download() {
     fi
 }
 
-function provisioning_setup_companion_server() {
-    printf "Setting up ComfyUI Companion Server...\n"
+function provisioning_setup_tunnel_upload() {
+    printf "Setting up AWS CLI and tunnel upload to S3...\n"
     
-    # Create the companion server script
-    cat > /workspace/comfyui_companion.py << 'EOF'
-#!/usr/bin/env python3
-"""
-ComfyUI Companion Server with Cloudflare Tunnel & S3 Integration
-- Creates free Cloudflare tunnel for port 8000: cloudflared tunnel --url http://localhost:8000
-- Extracts tunnel URL from cloudflared output
-- Stores tunnel URL in S3 as instance_id.json (no paths)
-- Minimal, focused functionality with auto-shutdown
-- Waits for ComfyUI to be ready before creating tunnel
-"""
+    # Create a script to extract tunnel URL and upload to S3 using AWS CLI
+    cat > /workspace/upload_tunnel.sh << 'EOF'
+#!/bin/bash
 
-import os
-import json
-import logging
-import subprocess
-import asyncio
-import aiohttp
-from fastapi import FastAPI, HTTPException, Depends, Request
-from fastapi.security import HTTPBearer
-from fastapi.responses import JSONResponse, Response
-import time
-import signal
-import threading
-import boto3
-from botocore.exceptions import ClientError
-import re
+# Wait for tunnel to be established
+sleep 30
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("comfyui-companion")
+# Get container information
+CONTAINER_ID=$(echo "$VAST_CONTAINERLABEL" | sed 's/C\.//')
+S3_BUCKET="$AWS_S3_BUCKET"
+S3_KEY="${CONTAINER_ID}.json"
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="ComfyUI Companion Server",
-    description="Companion server with Cloudflare tunnel and S3 integration",
-    version="1.0.0"
-)
+# Try to get tunnel URL from various sources
+TUNNEL_URL=""
 
-# Security
-security = HTTPBearer()
+# Method 1: Try to get from portal API
+if [ -z "$TUNNEL_URL" ]; then
+    echo "Attempting to get tunnel URL from portal API..."
+    if command -v curl &> /dev/null; then
+        API_RESPONSE=$(curl -s http://localhost:11112/get-all-quick-tunnels || true)
+        if [ -n "$API_RESPONSE" ]; then
+            TUNNEL_URL=$(echo "$API_RESPONSE" | grep -o '"url":"[^"]*"' | grep -o 'http[^"]*' | head -1 || true)
+        fi
+    fi
+fi
 
-# Configuration from environment variables
-API_TOKEN_SECRET = os.getenv("API_TOKEN_SECRET", "default-companion-token")
-COMFYUI_URL = os.getenv("COMFYUI_URL", "http://localhost:18188")
-COMPANION_PORT = int(os.getenv("COMPANION_PORT", "8000"))
+# Method 2: Try to find in logs
+if [ -z "$TUNNEL_URL" ]; then
+    echo "Searching for tunnel URL in logs..."
+    LOG_FILES=("/var/log/onstart.log" "/var/log/portal/tunnel_manager.log")
+    for LOG_FILE in "${LOG_FILES[@]}"; do
+        if [ -f "$LOG_FILE" ]; then
+            TUNNEL_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' "$LOG_FILE" | head -1 || true)
+            if [ -n "$TUNNEL_URL" ]; then
+                break
+            fi
+        fi
+    done
+fi
 
-# AWS configuration
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
-AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET", "")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-
-# Auto-shutdown configuration
-AUTO_SHUTDOWN_MINUTES = int(os.getenv("AUTO_SHUTDOWN_MINUTES", "60"))
-SHUTDOWN_GRACE_PERIOD = int(os.getenv("SHUTDOWN_GRACE_PERIOD", "300"))
-
-# Vast.ai container information
-VAST_CONTAINERLABEL = os.getenv("VAST_CONTAINERLABEL", "unknown")
-CONTAINER_ID = VAST_CONTAINERLABEL.replace("C.", "")  # Remove "C." prefix
-S3_KEY = f"{CONTAINER_ID}.json"  # Store as instance_id.json (no paths)
-
-# Cloudflare tunnel management
-tunnel_process = None
-tunnel_url = None
-comfyui_ready = False
-
-# Activity tracking
-last_activity_time = time.time()
-shutdown_timer = None
-is_shutting_down = False
-
-async def verify_token(credentials: HTTPBearer = Depends(security)):
-    """Verify the authentication token"""
-    if credentials.credentials != API_TOKEN_SECRET:
-        raise HTTPException(
-            status_code=401, 
-            detail="Invalid authentication token"
-        )
-    return credentials.credentials
-
-def get_aws_client(service_name='s3'):
-    """Get AWS client with proper credentials"""
-    try:
-        if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
-            session = boto3.Session(
-                aws_access_key_id=AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-                region_name=AWS_REGION
-            )
-        else:
-            session = boto3.Session(region_name=AWS_REGION)
-        
-        return session.client(service_name)
-    except Exception as e:
-        logger.error(f"Failed to create AWS {service_name} client: {str(e)}")
-        return None
-
-async def upload_to_s3(data: dict):
-    """Upload data to AWS S3 as instance_id.json"""
-    if not AWS_S3_BUCKET:
-        logger.warning("AWS_S3_BUCKET not configured, skipping S3 upload")
-        return False
+# If we found a tunnel URL, upload to S3
+if [ -n "$TUNNEL_URL" ] && [ -n "$S3_BUCKET" ]; then
+    echo "Found tunnel URL: $TUNNEL_URL"
     
-    try:
-        s3_client = get_aws_client('s3')
-        if not s3_client:
-            return False
-        
-        s3_client.put_object(
-            Bucket=AWS_S3_BUCKET,
-            Key=S3_KEY,
-            Body=json.dumps(data, indent=2),
-            ContentType='application/json',
-            ServerSideEncryption='AES256'
-        )
-        logger.info(f"Uploaded to S3: s3://{AWS_S3_BUCKET}/{S3_KEY}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to upload to S3: {str(e)}")
-        return False
-
-async def delete_from_s3():
-    """Delete data from AWS S3"""
-    if not AWS_S3_BUCKET:
-        return False
-    
-    try:
-        s3_client = get_aws_client('s3')
-        if not s3_client:
-            return False
-        
-        s3_client.delete_object(
-            Bucket=AWS_S3_BUCKET,
-            Key=S3_KEY
-        )
-        logger.info(f"Deleted from S3: s3://{AWS_S3_BUCKET}/{S3_KEY}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to delete from S3: {str(e)}")
-        return False
-
-async def check_comfyui_ready():
-    """Check if ComfyUI is ready"""
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{COMFYUI_URL}/system_stats", timeout=5) as response:
-                return response.status == 200
-    except:
-        return False
-
-def create_cloudflare_tunnel():
-    """Create a free Cloudflare tunnel: cloudflared tunnel --url http://localhost:8000"""
-    global tunnel_process, tunnel_url
-    
-    try:
-        logger.info("Creating Cloudflare tunnel: cloudflared tunnel --url http://localhost:8000")
-        
-        # Simple cloudflared command without --name or other arguments
-        tunnel_process = subprocess.Popen([
-            "cloudflared", "tunnel", 
-            "--url", f"http://localhost:{COMPANION_PORT}"
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        
-        # Wait for tunnel to establish
-        time.sleep(8)  # Give it more time to establish
-        
-        if tunnel_process.poll() is not None:
-            stderr = tunnel_process.stderr.read() if tunnel_process.stderr else "Unknown error"
-            raise Exception(f"Tunnel process failed: {stderr}")
-        
-        # Extract tunnel URL from output using multiple patterns
-        stdout_output = tunnel_process.stdout.read() if tunnel_process.stdout else ""
-        stderr_output = tunnel_process.stderr.read() if tunnel_process.stderr else ""
-        all_output = stdout_output + stderr_output
-        
-        logger.debug(f"Cloudflared output: {all_output}")
-        
-        # Try multiple patterns to extract URL
-        url_patterns = [
-            r'https://[a-zA-Z0-9-]+\.trycloudflare\.com',
-            r'\| (https://[a-zA-Z0-9-]+\.trycloudflare\.com)',
-            r'Your tunnel is available at (https://[a-zA-Z0-9-]+\.trycloudflare\.com)'
-        ]
-        
-        for pattern in url_patterns:
-            match = re.search(pattern, all_output)
-            if match:
-                tunnel_url = match.group(1) if len(match.groups()) > 0 else match.group(0)
-                logger.info(f"Cloudflare tunnel created: {tunnel_url}")
-                
-                # Upload tunnel info to S3
-                asyncio.create_task(upload_tunnel_info())
-                
-                return tunnel_url
-        
-        raise Exception("Failed to extract tunnel URL from cloudflared output")
-            
-    except Exception as e:
-        logger.error(f"Failed to create Cloudflare tunnel: {str(e)}")
-        if tunnel_process:
-            tunnel_process.terminate()
-        tunnel_process = None
-        raise
-
-async def upload_tunnel_info():
-    """Upload tunnel information to S3 as instance_id.json"""
-    if not tunnel_url:
-        return False
-    
-    data = {
-        "tunnel_url": tunnel_url,
-        "container_id": CONTAINER_ID,
-        "vast_containerlabel": VAST_CONTAINERLABEL,
-        "companion_port": COMPANION_PORT,
-        "comfyui_url": COMFYUI_URL,
-        "created_at": time.time(),
-        "public_ip": os.getenv('PUBLIC_IPADDR', 'unknown'),
-        "instance_type": os.getenv('INSTANCE_TYPE', 'unknown')
-    }
-    
-    return await upload_to_s3(data)
-
-def stop_cloudflare_tunnel():
-    """Stop the Cloudflare tunnel process"""
-    global tunnel_process, tunnel_url
-    
-    if tunnel_process:
-        try:
-            if tunnel_process.poll() is None:
-                tunnel_process.terminate()
-                tunnel_process.wait(timeout=5)
-                logger.info("Cloudflare tunnel stopped")
-        except:
-            pass
-        tunnel_process = None
-    
-    tunnel_url = None
-
-def update_activity():
-    """Update the last activity time and reset shutdown timer"""
-    global last_activity_time, shutdown_timer
-    
-    last_activity_time = time.time()
-    
-    # Reset shutdown timer
-    if shutdown_timer:
-        shutdown_timer.cancel()
-    
-    if AUTO_SHUTDOWN_MINUTES > 0:
-        shutdown_timer = threading.Timer(
-            AUTO_SHUTDOWN_MINUTES * 60,
-            initiate_shutdown
-        )
-        shutdown_timer.daemon = True
-        shutdown_timer.start()
-
-def initiate_shutdown():
-    """Initiate a graceful shutdown"""
-    global is_shutting_down
-    
-    logger.info(f"Initiating shutdown due to inactivity after {AUTO_SHUTDOWN_MINUTES} minutes")
-    is_shutting_down = True
-    
-    # Schedule actual shutdown after grace period
-    shutdown_timer = threading.Timer(SHUTDOWN_GRACE_PERIOD, force_shutdown)
-    shutdown_timer.daemon = True
-    shutdown_timer.start()
-
-def force_shutdown():
-    """Force shutdown the server"""
-    logger.info("Force shutting down server")
-    os.kill(os.getpid(), signal.SIGTERM)
-
-async def wait_for_comfyui():
-    """Wait for ComfyUI to be ready before creating tunnel"""
-    global comfyui_ready
-    
-    max_attempts = 60  # 5 minutes max wait time
-    attempt = 0
-    
-    while attempt < max_attempts and not comfyui_ready:
-        attempt += 1
-        comfyui_ready = await check_comfyui_ready()
-        
-        if comfyui_ready:
-            logger.info("ComfyUI is ready, creating tunnel...")
-            create_cloudflare_tunnel()
-            return
-        else:
-            logger.info(f"Waiting for ComfyUI to be ready... (attempt {attempt}/{max_attempts})")
-            await asyncio.sleep(5)  # Wait 5 seconds between checks
-    
-    if not comfyui_ready:
-        logger.error("ComfyUI did not become ready within the expected time")
-
-@app.middleware("http")
-async def activity_middleware(request: Request, call_next):
-    """Middleware to track activity on all requests"""
-    update_activity()
-    response = await call_next(request)
-    return response
-
-@app.get("/")
-async def root(token: str = Depends(verify_token)):
-    """Root endpoint with server info"""
-    return {
-        "message": "ComfyUI Companion Server",
-        "version": "1.0.0",
-        "comfyui_url": COMFYUI_URL,
-        "container_id": CONTAINER_ID,
-        "comfyui_ready": comfyui_ready,
-        "tunnel_url": tunnel_url,
-        "tunnel_status": "active" if tunnel_url else "inactive",
-        "aws_configured": bool(AWS_S3_BUCKET),
-        "auto_shutdown_minutes": AUTO_SHUTDOWN_MINUTES,
-        "last_activity": time.time() - last_activity_time
-    }
-
-@app.get("/health")
-async def health_check():
-    """Health check for ComfyUI and companion server"""
-    try:
-        comfyui_healthy = await check_comfyui_ready()
-        comfyui_status = "healthy" if comfyui_healthy else "unhealthy"
-                
-        return {
-            "comfyui": comfyui_status,
-            "companion": "healthy",
-            "tunnel": "active" if tunnel_url else "inactive",
-            "container_id": CONTAINER_ID
-        }
-    except Exception as e:
-        return {
-            "comfyui": "unreachable",
-            "companion": "healthy",
-            "error": str(e)
-        }
-
-@app.get("/tunnel/info")
-async def get_tunnel_info(token: str = Depends(verify_token)):
-    """Get tunnel information"""
-    if not tunnel_url:
-        raise HTTPException(status_code=404, detail="Tunnel not active")
-    
-    return {
-        "url": tunnel_url,
-        "container_id": CONTAINER_ID,
-        "status": "active"
-    }
-
-@app.post("/tunnel/restart")
-async def restart_tunnel(token: str = Depends(verify_token)):
-    """Restart the Cloudflare tunnel"""
-    global tunnel_url
-    
-    # Stop existing tunnel
-    stop_cloudflare_tunnel()
-    
-    # Create new tunnel
-    try:
-        new_url = create_cloudflare_tunnel()
-        return {
-            "message": "Tunnel restarted",
-            "url": new_url,
-            "container_id": CONTAINER_ID
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to restart tunnel: {str(e)}")
-
-@app.post("/shutdown/now")
-async def shutdown_now(grace_period: int = 60, token: str = Depends(verify_token)):
-    """Initiate immediate shutdown"""
-    global is_shutting_down
-    
-    if is_shutting_down:
-        return {"message": "Shutdown already in progress"}
-    
-    is_shutting_down = True
-    
-    # Schedule shutdown
-    threading.Timer(grace_period, force_shutdown).start()
-    
-    return {"message": f"Shutdown initiated. Will terminate in {grace_period} seconds."}
-
-@app.post("/activity/reset")
-async def reset_activity(token: str = Depends(verify_token)):
-    """Reset the activity timer"""
-    update_activity()
-    return {"message": "Activity timer reset"}
-
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"])
-async def proxy_comfyui(path: str, request: Request, token: str = Depends(verify_token)):
-    """Proxy all requests to ComfyUI"""
-    if is_shutting_down:
-        raise HTTPException(status_code=503, detail="Server is shutting down")
-    
-    # Check if ComfyUI is ready
-    if not comfyui_ready:
-        raise HTTPException(status_code=503, detail="ComfyUI is not ready yet")
-    
-    # Build the target URL
-    target_url = f"{COMFYUI_URL}/{path}"
-    if request.query_params:
-        target_url += "?" + str(request.query_params)
-    
-    # Forward the request to ComfyUI
-    try:
-        async with aiohttp.ClientSession() as session:
-            # Prepare request data
-            data = await request.body() if request.method in ["POST", "PUT", "PATCH"] else None
-            headers = dict(request.headers)
-            
-            # Remove host header to avoid issues
-            headers.pop("host", None)
-            
-            # Make the request to ComfyUI
-            async with session.request(
-                method=request.method,
-                url=target_url,
-                headers=headers,
-                data=data,
-                timeout=30
-            ) as response:
-                # Return the response from ComfyUI
-                content = await response.read()
-                return Response(
-                    content=content,
-                    status_code=response.status,
-                    headers=dict(response.headers)
-                )
-    except Exception as e:
-        logger.error(f"Error proxying to ComfyUI: {str(e)}")
-        raise HTTPException(status_code=502, detail=f"ComfyUI unreachable: {str(e)}")
-
-@app.get("/container/info")
-async def get_container_info():
-    """Get container information (no authentication required)"""
-    return {
-        "container_id": CONTAINER_ID,
-        "vast_containerlabel": VAST_CONTAINERLABEL,
-        "public_ip": os.getenv('PUBLIC_IPADDR', 'unknown'),
-        "gpu_count": os.getenv('GPU_COUNT', 'unknown')
-    }
-
-# Initialize on startup
-@app.on_event("startup")
-async def startup_event():
-    """Initialize on startup"""
-    logger.info(f"Companion server started on port {COMPANION_PORT}")
-    logger.info(f"Container ID: {CONTAINER_ID}")
-    logger.info(f"AWS configured: {bool(AWS_S3_BUCKET)}")
-    logger.info(f"Auto-shutdown: {AUTO_SHUTDOWN_MINUTES} minutes")
-    
-    # Initialize activity tracking
-    update_activity()
-    
-    # Start background task to wait for ComfyUI and then create tunnel
-    asyncio.create_task(wait_for_comfyui())
-
-# Cleanup on shutdown
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up on shutdown"""
-    logger.info("Shutting down companion server")
-    
-    # Stop Cloudflare tunnel
-    stop_cloudflare_tunnel()
-    
-    # Clean up S3
-    await delete_from_s3()
-    
-    # Cancel shutdown timer if it exists
-    if shutdown_timer:
-        shutdown_timer.cancel()
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=COMPANION_PORT,
-        log_level="info"
+    # Create JSON data
+    JSON_DATA=$(cat <<END
+{
+    "tunnel_url": "$TUNNEL_URL",
+    "container_id": "$CONTAINER_ID",
+    "vast_containerlabel": "$VAST_CONTAINERLABEL",
+    "public_ip": "${PUBLIC_IPADDR:-unknown}",
+    "instance_type": "${INSTANCE_TYPE:-unknown}",
+    "created_at": $(date +%s),
+    "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+END
     )
+    
+    # Create temp file
+    TEMP_FILE=$(mktemp)
+    echo "$JSON_DATA" > "$TEMP_FILE"
+    
+    # Upload to S3 using AWS CLI
+    echo "Uploading tunnel info to S3..."
+    if aws s3 cp "$TEMP_FILE" "s3://$S3_BUCKET/$S3_KEY" --region "${AWS_REGION:-us-east-1}"; then
+        echo "Successfully uploaded tunnel information to S3"
+    else
+        echo "Failed to upload to S3"
+    fi
+    
+    # Clean up
+    rm -f "$TEMP_FILE"
+else
+    echo "Could not find tunnel URL or S3 bucket not configured"
+fi
 EOF
 
     # Make the script executable
-    chmod +x /workspace/comfyui_companion.py
+    chmod +x /workspace/upload_tunnel.sh
     
-    # Create a supervisor configuration to start the server automatically
-    cat > /etc/supervisor/conf.d/comfyui-companion.conf << 'EOF'
-[program:comfyui-companion]
-command=/venv/main/bin/python /workspace/comfyui_companion.py
-directory=/workspace
-autostart=true
-autorestart=true
-stderr_logfile=/var/log/portal/comfyui-companion.err.log
-stdout_logfile=/var/log/portal/comfyui-companion.out.log
-environment=PYTHONUNBUFFERED=1
+    # Create a systemd service to run the upload script
+    cat > /etc/systemd/system/upload-tunnel.service << EOF
+[Unit]
+Description=Upload Vast.ai tunnel info to S3
+After=network.target
+
+[Service]
+Type=oneshot
+Environment=VAST_CONTAINERLABEL=$VAST_CONTAINERLABEL
+Environment=AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+Environment=AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+Environment=AWS_S3_BUCKET=$AWS_S3_BUCKET
+Environment=AWS_REGION=$AWS_REGION
+Environment=PUBLIC_IPADDR=$PUBLIC_IPADDR
+Environment=INSTANCE_TYPE=$INSTANCE_TYPE
+ExecStart=/bin/bash /workspace/upload_tunnel.sh
+User=root
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
-    # Update supervisor to include the new configuration
-    supervisorctl update
+    # Enable and start the service
+    systemctl daemon-reload
+    systemctl enable upload-tunnel.service
+    systemctl start upload-tunnel.service
     
-    # Update PORTAL_CONFIG to include the companion server
-    # This ensures the companion server is accessible through the Instance Portal
-    if [ -f /etc/portal.yaml ]; then
-        # Check if companion server is already in the config
-        if ! grep -q "Companion Server" /etc/portal.yaml; then
-            # Add companion server to the config
-            sed -i '/^applications:/a\  - host: localhost\n    external_port: 8000\n    local_port: 8000\n    path: /\n    name: Companion Server' /etc/portal.yaml
-        fi
-    else
-        # Create a new portal.yaml if it doesn't exist
-        cat > /etc/portal.yaml << 'EOF'
-applications:
-  - host: localhost
-    external_port: 8000
-    local_port: 8000
-    path: /
-    name: Companion Server
-EOF
-    fi
-    
-    # Restart caddy to apply changes
-    supervisorctl restart caddy
-    
-    printf "Companion server setup complete. It will start automatically and wait for ComfyUI to be ready.\n"
+    printf "Tunnel upload service setup complete. Tunnel information will be uploaded to S3.\n"
 }
 
 # Allow user to disable provisioning if they started with a script they didn't want
