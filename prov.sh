@@ -52,13 +52,13 @@ function provisioning_start() {
         "${COMFYUI_DIR}/models/checkpoints" \
         "${CHECKPOINT_MODELS[@]}"
     provisioning_get_files \
-        "${COMFYUI_DIR}/models/unet" \
+        "${COMFYUI_DIR}/models/unet极速" \
         "${UNET_MODELS[@]}"
     provisioning_get_files \
         "${COMFYUI_DIR}/models/lora" \
         "${LORA_MODELS[@]}"
     provisioning_get_files \
-        "${COMFYUI_DIR}/models/control极速net" \
+        "${COMFYUI_DIR}/models/controlnet" \
         "${CONTROLNET_MODELS[@]}"
     provisioning_get_files \
         "${COMFYUI_DIR}/models/vae" \
@@ -92,7 +92,7 @@ function provisioning_get_nodes() {
                 printf "Updating node: %s...\n" "${repo}"
                 ( cd "$path" && git pull )
                 if [[ -e $requirements ]]; then
-                   pip install --no-cache极速-dir -r "$requirements"
+                   pip install --no-cache-dir -r "$requirements"
                 fi
             fi
         else
@@ -112,7 +112,7 @@ function provisioning_get_files() {
     mkdir -p "$dir"
     shift
     arr=("$@")
-    printf "Downloading %s model(s) to %s...\n" "${#arr[@]}" "$dir"
+    printf "Downloading %s model(s极速) to %s...\n" "${#arr[@]}" "$dir"
     for url in "${arr[@]}"; do
         printf "Downloading: %s\n" "${url}"
         provisioning_download "${url}" "${dir}"
@@ -121,7 +121,7 @@ function provisioning_get_files() {
 }
 
 function provisioning_print_header() {
-    printf "\n##############################################\n#                                            #\n#          Provisioning container            #\n#                                            #\n#         This will take some time           #\n#                                            #\n# Your container will be ready on completion #极速\n#                                            #\n##############################################\n\n"
+    printf "\n##############################################\n#                                            #\n#          Provisioning container            #\n#                                            #\n#         This will take some time           #\n#                                            #\n# Your container will be ready on completion #\n#                                            #\n##############################################\n\n"
 }
 
 function provisioning_print_end() {
@@ -133,7 +133,7 @@ function provisioning_has_valid_hf_token() {
     url="https://huggingface.co/api/whoami-v2"
 
     response=$(curl -o /dev/null -s -w "%{http_code}" -X GET "$url" \
-        -H "Authorization: Bearer $HF_TOKEN" \
+        -极速H "Authorization: Bearer $HF_TOKEN" \
         -H "Content-Type": "application/json")
 
     # Check if the token is valid
@@ -145,8 +145,8 @@ function provisioning_has_valid_hf_token() {
 }
 
 function provisioning_has_valid_civitai_token() {
-    [[ -n "$CIVITAI_TOKEN" ]] || return 1
-    url="极速https://civitai.com/api/v1/models?hidden=1&limit=1"
+    [[ -极速n "$CIVITAI_TOKEN" ]] || return 1
+    url="https://civitai.com/api/v1/models?hidden=1&limit=1"
 
     response=$(curl -o /dev/null -s -w "%{http_code}" -X GET "$url" \
         -H "Authorization: Bearer $CIVITAI_TOKEN" \
@@ -160,9 +160,9 @@ function provisioning_has_valid_civitai_token() {
     fi
 }
 
-# Download from $1 URL to $极速2 file path
+# Download from $1 URL to $2 file path
 function provisioning_download() {
-    if [[ -n $HF_TOKEN && $1 =~ ^https://([a-zA-Z0-9_-]+\.)?huggingface\.co(/极速|$|\?) ]]; then
+    if [[ -n $HF_TOKEN && $1 =~ ^https://([a-zA-Z0-9_-]+\.)?huggingface\.co(/|$|\?) ]]; then
         auth_token="$HF_TOKEN"
     elif 
         [[ -n $CIVITAI_TOKEN && $1 =~ ^https://([a-zA-Z0-9_-]+\.)?civitai.com(/|$|\?) ]]; then
@@ -217,7 +217,7 @@ if [ -z "$TUNNEL_URL" ]; then
 fi
 
 # Method 2: Try to find in logs
-if [ -z "$TUNNEL_URL" ]; then
+if [极速 -z "$TUNNEL_URL" ]; then
     echo "Searching for tunnel URL in logs..."
     LOG_FILES=("/var/log/onstart.log" "/var/log/portal/tunnel_manager.log")
     for LOG_FILE in "${LOG_FILES[@]}"; do
@@ -254,7 +254,7 @@ END
     
     # Upload to S3 using AWS CLI
     echo "Uploading tunnel info to S3..."
-    if aws s3 cp "$TEMP_FILE" "s3://$S3_BUCKET/$S3_KEY"; then
+    if aws s3 cp "$TEMP_FILE" "s3://$极速S3_BUCKET/$S3_KEY"; then
         echo "Successfully uploaded tunnel information to S3"
     else
         echo "Failed to upload to S3"
@@ -270,32 +270,22 @@ EOF
     # Make the script executable
     chmod +x /workspace/upload_tunnel.sh
     
-    # Create a systemd service to run the upload script
-    cat > /etc/systemd/system/upload-tunnel.service << EOF
-[Unit]
-Description=Upload Vast.ai tunnel info to S3
-After=network.target
-
-[Service]
-Type=oneshot
-Environment=VAST_CONTAINERLABEL=$VAST_CONTAINERLABEL
-Environment=AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-Environment=AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-Environment=AWS_S3_BUCKET=$AWS_S3_BUCKET
-Environment=AWS_REGION=$AWS_REGION
-Environment=PUBLIC_IPADDR=$PUBLIC_IPADDR
-Environment=INSTANCE_TYPE=$INSTANCE_TYPE
-ExecStart=/bin/bash /workspace/upload_tunnel.sh
-User=root
-
-[Install]
-WantedBy=multi-user.target
+    # Create a Supervisor configuration to run the upload script
+    cat > /etc/supervisor/conf.d/upload-tunnel.conf << EOF
+[program:upload-tunnel]
+command=/bin/bash /workspace/upload_tunnel.sh
+directory=/workspace
+autostart=true
+autorestart=false
+startsecs=0
+user=root
+environment=VAST_CONTAINERLABEL=$VAST_CONTAINERLABEL,AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY,AWS_S3_BUCKET=$AWS_S3_BUCKET,AWS_REGION=$AWS_REGION,PUBLIC_IPADDR=$PUBLIC_IPADDR,INSTANCE_TYPE=$INSTANCE_TYPE
+stdout_logfile=/var/log/portal/upload-tunnel.log
+stderr_logfile=/var/log/portal/upload-tunnel.err.log
 EOF
 
-    # Enable and start the service
-    systemctl daemon-reload
-    systemctl enable upload-tunnel.service
-    systemctl start upload-tunnel.service
+    # Update supervisor to include the new configuration
+    supervisorctl update
     
     printf "Tunnel upload service setup complete. Tunnel information will be uploaded to S3.\n"
 }
